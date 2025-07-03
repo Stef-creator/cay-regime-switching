@@ -1,0 +1,90 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# VSCode settings
+.vscode/
+
+# Environment files
+.env
+.venv/
+venv/
+ENV/
+env/
+*.env
+
+# Data and results
+*.csv
+*.xlsx
+*.h5
+*.pkl
+*.npz
+*.npy
+*.feather
+*.parquet
+*.sav
+*.dta
+*.rds
+*.rdata
+*.sas7bdat
+*.xls
+*.xlsm
+*.xlsb
+*.ods
+*.db
+*.sqlite
+*.sqlite3
+
+# Results and output folders
+results/
+output/
+outputs/
+figures/
+plots/
+logs/
+log/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Python egg files
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+__pypackages__/
+
+# Test and coverage
+.coverage
+.tox/
+.nox/
+.cache/
+pytest_cache/
+htmlcov/
+coverage.xml
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# Jupyter runtime
+*.nbconvert.ipynb
+
+# Misc
+*.bak
+*.swp
+*.swo
+*~
