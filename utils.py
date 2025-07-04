@@ -129,12 +129,51 @@ def merge_macro_excess_returns(df, returns):
     return merged
 
 def create_horizons(df):
+    """
+    Adds future return columns to the DataFrame for specified horizons.
+
+    For each horizon in [1, 4, 16], this function computes the sum of 'excess_ret'
+    over a rolling window of that horizon, shifted so that the sum represents the
+    future return starting from the current row. The resulting columns are named
+    'future_ret_{h}q', where h is the horizon.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame containing an 'excess_ret' column.
+
+    Returns:
+        list: The list of horizons used ([1, 4, 16]).
+    """
     horizons = [1, 4, 16]
     for h in horizons:
         df[f'future_ret_{h}q'] = df['excess_ret'].rolling(window=h).sum().shift(-h+1)
     return horizons
 
 def hamilton_filter(y, X, alpha, beta, sigma2, P, pi0):
+    """
+    Implements the Hamilton filter for a Markov-switching (regime-switching) model.
+
+    Parameters
+    ----------
+    y : array_like, shape (T,)
+        Observed time series data.
+    X : array_like, shape (T,)
+        Explanatory variable(s) or regressors for the observation equation.
+    alpha : array_like, shape (k,)
+        Intercepts for each regime.
+    beta : float or array_like
+        Slope coefficient(s) for the explanatory variable(s).
+    sigma2 : float
+        Variance of the observation noise (assumed equal across regimes).
+    P : array_like, shape (k, k)
+        Regime transition probability matrix, where P[i, j] is the probability of transitioning from regime i to regime j.
+    pi0 : array_like, shape (k,)
+        Initial probabilities for each regime at time 0.
+
+    Returns
+    -------
+    xi : ndarray, shape (T, k)
+        Filtered probabilities of being in each regime at each time point.
+    """
     T = len(y)
     k = len(alpha)
     xi = np.zeros((T, k))   # filtered probabilities
@@ -158,6 +197,25 @@ def hamilton_filter(y, X, alpha, beta, sigma2, P, pi0):
     return xi
 
 def backward_sampling(xi, P):
+    """
+    Perform backward sampling for a hidden Markov model (HMM) given smoothed state probabilities and transition matrix.
+
+    Parameters
+    ----------
+    xi : np.ndarray
+        A (T, k) array of smoothed state probabilities, where T is the number of time steps and k is the number of states.
+    P : np.ndarray
+        A (k, k) state transition probability matrix, where P[i, j] is the probability of transitioning from state i to state j.
+
+    Returns
+    -------
+    s_t : np.ndarray
+        An array of length T containing the sampled sequence of hidden states (as integer indices) in reverse order, sampled according to the backward algorithm.
+
+    Notes
+    -----
+    This function implements the backward sampling step commonly used in Bayesian inference for HMMs, such as in the Forward-Filtering Backward-Sampling (FFBS) algorithm.
+    """
     T, k = xi.shape
     s_t = np.zeros(T, dtype=int)
 
@@ -171,301 +229,6 @@ def backward_sampling(xi, P):
         s_t[t] = np.random.choice(k, p=prob)
 
     return s_t
-
-def cay_MS_MLE_with_macro_forecast(df, horizons, model='yt', macro_controls=['interest_rate', 'CPI_inflation', 'unemployment'], save_csv=True):
-    """
-    Runs and prints OLS forecasting regressions of future returns on MLE-based CAY variables with macroeconomic controls for multiple horizons.
-    Does NOT compare with a no-macro variant.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        The input DataFrame containing future returns, CAY variables, and macroeconomic controls.
-    horizons : iterable
-        Iterable of forecast horizons (in quarters) to use for the dependent variable (e.g., [1, 4, 8]).
-    model : str, optional
-        Model type suffix used in column naming (default is 'yt').
-    macro_controls : list of str, optional
-        List of column names to use as macroeconomic control variables in the regression.
-    save_csv : bool, optional
-        If True, saves the regression results to a CSV file.
-
-    Returns
-    -------
-    results_df : pandas.DataFrame or None
-        Regression results DataFrame if save_csv is True and results exist, otherwise None.
-    """
-
-    results = []
-
-    # Define MLE-based cay_MS variable name
-    cay_ms_mle_var = f'cay_MS_MLE_{model}'
-
-    for h in horizons:
-        if cay_ms_mle_var not in df.columns:
-            print(f"Skipping {cay_ms_mle_var}: not in dataframe.")
-            continue
-
-        # Check macro control columns exist
-        missing_controls = [col for col in macro_controls if col not in df.columns]
-        if missing_controls:
-            print(f"Skipping horizon {h} for {cay_ms_mle_var}: missing macro controls {missing_controls}")
-            continue
-
-        df_reg = df.dropna(subset=[f'future_ret_{h}q', cay_ms_mle_var, *macro_controls])
-        if df_reg.empty:
-            print(f"\n🔷 Horizon h={h}q: No data available for {cay_ms_mle_var}.")
-            continue
-
-        X = df_reg[[cay_ms_mle_var, *macro_controls]]
-        X = sm.add_constant(X)
-        y = df_reg[f'future_ret_{h}q']
-
-        model_reg = sm.OLS(y, X).fit()
-        print(f"\n🔷 Forecasting regression for horizon h={h}q using {cay_ms_mle_var} (MLE) with macro controls")
-        print(model_reg.summary())
-
-        if save_csv:
-            for var in [cay_ms_mle_var] + macro_controls:
-                results.append({
-                    'horizon': h,
-                    'cay_var': cay_ms_mle_var,
-                    'variable': var,
-                    'coef': model_reg.params.get(var, float('nan')),
-                    'tstat': model_reg.tvalues.get(var, float('nan')),
-                    'pval': model_reg.pvalues.get(var, float('nan')),
-                    'r2': model_reg.rsquared,
-                    'nobs': int(model_reg.nobs)
-                })
-
-    csv_path = f'results/cay_MS_MLE_with_macro_results_{model}.csv'
-    if save_csv and results:
-        results_df = pd.DataFrame(results)
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        results_df.to_csv(csv_path, index=False)
-        print(f"\nRegression results saved to {csv_path}")
-        return results_df
-    else:
-        return None
-
-def compare_cay_FC_vs_MS_with_macro(df, horizons, model = 'yt', macro_controls = ['interest_rate', 'CPI_inflation', 'unemployment'], save_csv=True):
-    """
-    Runs and prints OLS forecasting regressions of future returns on CAY variables and macroeconomic controls for multiple horizons.
-    Optionally saves regression results (coefficients, t-stats, p-values, R2, etc.) to a CSV file.
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        The input DataFrame containing future returns, CAY variables, and macroeconomic controls.
-    macro_controls : list of str, optional
-        List of column names to use as macroeconomic control variables in the regression (default is ['interest_rate', 'CPI_inflation', 'unemployment']).
-    horizons : iterable
-        Iterable of forecast horizons (in quarters) to use for the dependent variable (e.g., [1, 4, 8]).
-    save_csv : bool, optional
-        If True, saves the regression results to a CSV file.
-    csv_path : str, optional
-        Path to save the CSV file if save_csv is True.
-    Returns
-    -------
-    None
-        Prints regression summaries to the console. Optionally saves results to CSV.
-    """
-    results = []
-    for h in horizons:
-        for cay_var in [f'cay_FC_{model}', f'cay_MS_{model}']:
-            if cay_var not in df.columns:
-                continue
-
-            df_reg = df.dropna(subset=[f'future_ret_{h}q', cay_var, *macro_controls])
-            
-            if df_reg.empty:
-                print(f"\n🔷 Horizon h={h}q: No data available for {cay_var}.")
-                continue
-            
-            X = df_reg[[cay_var, *macro_controls]]
-            X = sm.add_constant(X)
-            y = df_reg[f'future_ret_{h}q']
-            
-            model_reg = sm.OLS(y, X).fit()
-            print(f"\n🔷 Forecasting regression for horizon h={h}q using {cay_var} with added macro indicators")
-            print(model_reg.summary())
-
-            if save_csv:
-                for var in [cay_var] + macro_controls:
-                    results.append({
-                        'horizon': h,
-                        'cay_var': cay_var,
-                        'variable': var,
-                        'coef': model_reg.params[var],
-                        'tstat': model_reg.tvalues[var],
-                        'pval': model_reg.pvalues[var],
-                        'r2': model_reg.rsquared,
-                        'nobs': int(model_reg.nobs)
-                    })
-
-    csv_path=f'results/cay_FC_vs_MS_with_macro_results_{model}.csv'
-    if save_csv and results:
-        results_df = pd.DataFrame(results)
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        results_df.to_csv(csv_path, index=False)
-        print(f"\nRegression results saved to {csv_path}")
-
-def compare_cay_FC_vs_MS(df, horizons, model = 'yt', save_csv=True):
-    """
-    Runs and prints OLS forecasting regressions of future returns on two different CAY variables over multiple horizons.
-    For each horizon in `horizons`, this function iterates over the variables 'cay_FC' and 'cay_MS' (if present in the DataFrame),
-    and performs an OLS regression of the future return at that horizon on the selected CAY variable. The regression summary is printed
-    for each case. If data is missing for a given variable and horizon, a message is printed instead.
-    Optionally saves regression results (coefficients, t-stats, p-values, R2, etc.) to a CSV file.
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Input DataFrame containing columns for future returns (e.g., 'future_ret_1q', 'future_ret_2q', etc.)
-        and the CAY variables ('cay_FC', 'cay_MS').
-    horizons : iterable
-        Iterable of integer horizons (in quarters) to use for forecasting regressions. Each horizon `h` should correspond
-        to a column in `df` named 'future_ret_{h}q'.
-    save_csv : bool, optional
-        If True, saves the regression results to a CSV file.
-    Returns
-    -------
-    None
-        This function prints regression summaries and messages to the console, but does not return any value.
-    Notes
-    -----
-    - Requires `statsmodels.api` as `sm` to be imported in the global namespace.
-    - Rows with missing data for the dependent or independent variable are dropped before regression.
-    """
-    results = []
-    for h in horizons:
-        for cay_var in [f'cay_FC_{model}', f'cay_MS_{model}']:
-            if cay_var not in df.columns:
-                continue
-            
-            df_reg = df.dropna(subset=[f'future_ret_{h}q', cay_var])
-            
-            if df_reg.empty:
-                print(f"\n🔷 Horizon h={h}q: No data available for {cay_var}.")
-                continue
-            
-            # Define X and y
-            X = df_reg[[cay_var]]
-            X = sm.add_constant(X)
-            y = df_reg[f'future_ret_{h}q']
-            
-            # Fit OLS regression
-            model_reg = sm.OLS(y, X).fit()
-            print(f"\n🔷 Forecasting regression for horizon h={h}q using {cay_var}")
-            print(model_reg.summary())
-
-            if save_csv:
-                for var in [cay_var]:
-                    results.append({
-                        'horizon': h,
-                        'cay_var': cay_var,
-                        'variable': var,
-                        'coef': model_reg.params[var],
-                        'tstat': model_reg.tvalues[var],
-                        'pval': model_reg.pvalues[var],
-                        'r2': model_reg.rsquared,
-                        'nobs': int(model_reg.nobs)
-                    })
-
-    csv_path = f'results/cay_FC_vs_MS_results_{model}.csv'
-    if save_csv and results:
-        results_df = pd.DataFrame(results)
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        results_df.to_csv(csv_path, index=False)
-        print(f"\nRegression results saved to {csv_path}")
-
-def load_all_cay_FC_vs_MS_results(results_dir='results'):
-    """
-    Loads and concatenates all cay_FC_vs_MS_results_*.csv files in the specified directory.
-
-    Args:
-        results_dir (str): Directory containing the result CSV files.
-
-    Returns:
-        pd.DataFrame: Concatenated DataFrame of all results.
-    """
-    pattern = os.path.join(results_dir, 'cay_FC_vs_MS_results_*.csv')
-    csv_files = glob.glob(pattern)
-    if not csv_files:
-        raise FileNotFoundError(f"No result files found in {results_dir}")
-    dfs = [pd.read_csv(f) for f in csv_files]
-    all_results = pd.concat(dfs, ignore_index=True)
-    all_results.to_csv(f'results/cay_FC_vs_MS_results_all_results.csv', index=False)
-    print(f"Results saved to cay_FC_vs_MS_results_all_results.csv")
-    return all_results
-
-def rolling_oos_forecast(df, predictor_col, target_col, min_train=60, horizon=1, freq=4, verbose=True):
-    """
-    Rolling expanding window out-of-sample forecast evaluation.
-
-    Parameters:
-    - df: dataframe with predictor and target
-    - predictor_col: string, name of predictor column
-    - target_col: string, name of target column (e.g. future_ret_4q)
-    - min_train: minimum initial training window size
-    - horizon: forecast horizon
-    - freq: annualization factor for Sharpe ratio
-    - verbose: print progress
-
-    Returns:
-    - results_df: dataframe with date, true, pred, residual, oos_r2, implied_sr
-    """
-    y_true_all = []
-    y_pred_all = []
-
-    dates = df.index[min_train + horizon - 1:]  # dates for which forecast is made
-
-    for t in range(min_train, len(df) - horizon + 1):
-        train_df = df.iloc[:t]
-        test_df = df.iloc[t + horizon - 1]
-
-        # Fit OLS regression (intercept + predictor)
-        X_train = np.column_stack((np.ones(len(train_df)), train_df[predictor_col].values))
-        y_train = train_df[target_col].values
-
-        beta_hat = np.linalg.lstsq(X_train, y_train, rcond=None)[0]
-
-        # Forecast
-        x_test = np.array([1, test_df[predictor_col]])
-        y_pred = np.dot(x_test, beta_hat)
-        y_true = test_df[target_col]
-
-        y_true_all.append(y_true)
-        y_pred_all.append(y_pred)
-
-        if verbose and (t % 20 == 0):
-            print(f"Iteration {t}/{len(df) - horizon}")
-
-    # Convert to arrays
-    y_true_all = np.array(y_true_all)
-    y_pred_all = np.array(y_pred_all)
-
-    # Compute OOS R²
-    mse = mean_squared_error(y_true_all, y_pred_all)
-    var = np.var(y_true_all, ddof=1)
-    oos_r2 = 1 - mse / var
-
-    # Implied Sharpe
-    sr_unannualized = np.sqrt(max(oos_r2,0))
-    sr_annualized = sr_unannualized * np.sqrt(freq)
-
-    # Results dataframe
-    results_df = pd.DataFrame({
-        'date': dates,
-        'y_true': y_true_all,
-        'y_pred': y_pred_all,
-        'residual': y_true_all - y_pred_all
-    })
-    results_df.set_index('date', inplace=True)
-
-    if verbose:
-        print(f"OOS R²: {oos_r2:.4f}")
-        print(f"Implied annualized Sharpe ratio: {sr_annualized:.4f}")
-
-    return results_df, oos_r2, sr_annualized
 
 def compute_implied_sharpe(y_true, y_pred, freq=4):
     """
@@ -500,94 +263,6 @@ def compute_implied_sharpe(y_true, y_pred, freq=4):
     print(f"Implied annualized SR: {sr_annualized:.4f}")
 
     return sr_annualized
-
-# === Example usage ===
-
-# Replace with your actual regression inputs
-# y_true = df['future_ret_4q'].values
-# y_pred = regression_model.predict(df[['const', 'cay_FC_yt']])
-
-# sr = compute_implied_sharpe(y_true, y_pred, freq=4)
-
-def forecast_regressions(df, predictor_vars, horizons, macro_controls=None, save_csv=True, csv_prefix='forecast_results'):
-    """
-    Runs OLS forecasting regressions of future returns on a list of predictor variables with optional macro controls.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        DataFrame containing future returns, predictor variables, and macro controls.
-    predictor_vars : list of str
-        List of predictor variable column names to include as X.
-    horizons : iterable
-        List of forecast horizons (in quarters) to use for dependent variables (e.g., [1,4,16]).
-    macro_controls : list of str, optional
-        List of macro control column names to include in regressions.
-    save_csv : bool, optional
-        If True, saves the regression results to a CSV file.
-    csv_prefix : str, optional
-        Filename prefix for the saved CSV.
-
-    Returns
-    -------
-    results_df : pandas.DataFrame
-        DataFrame of regression results.
-    """
-
-    results = []
-
-    for h in horizons:
-        y_col = f'future_ret_{h}q'
-
-        for var in predictor_vars:
-            if var not in df.columns:
-                print(f"Skipping {var}: not in dataframe.")
-                continue
-
-            required_cols = [y_col, var] + (macro_controls if macro_controls else [])
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            if missing_cols:
-                print(f"Skipping {var} horizon {h}: missing columns {missing_cols}")
-                continue
-
-            df_reg = df.dropna(subset=required_cols)
-            if df_reg.empty:
-                print(f"\n🔷 Horizon h={h}q: No data available for {var}.")
-                continue
-
-            # Define X and y
-            X_cols = [var] + (macro_controls if macro_controls else [])
-            X = sm.add_constant(df_reg[X_cols])
-            y = df_reg[y_col]
-
-            model_reg = sm.OLS(y, X).fit()
-            print(f"\n🔷 Forecasting regression for horizon h={h}q using {var} {'with macro controls' if macro_controls else '(no macro)'}")
-            print(model_reg.summary())
-
-            # Store results
-            for x_var in X_cols:
-                results.append({
-                    'horizon': h,
-                    'predictor': var,
-                    'variable': x_var,
-                    'coef': model_reg.params.get(x_var, float('nan')),
-                    'tstat': model_reg.tvalues.get(x_var, float('nan')),
-                    'pval': model_reg.pvalues.get(x_var, float('nan')),
-                    'r2': model_reg.rsquared,
-                    'nobs': int(model_reg.nobs)
-                })
-
-    # Convert to dataframe and save if needed
-    results_df = pd.DataFrame(results)
-
-    if save_csv and not results_df.empty:
-        csv_path = f'results/{csv_prefix}.csv'
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        results_df.to_csv(csv_path, index=False)
-        print(f"\nRegression results saved to {csv_path}")
-
-    return results_df
-
 
 def backtest_directional_strategy(df, forecast_col, return_col, cost_bp=0, plot=True):
     """
@@ -670,10 +345,8 @@ def backtest_directional_strategy(df, forecast_col, return_col, cost_bp=0, plot=
     
     return results
 
-
 def rolling_window_forecast(df, predictor, target, window_size=40, expanding=True):
-    preds = []
-    actuals = []
+    preds, actuals = [], []
 
     for start in range(len(df) - window_size):
         if expanding:
@@ -684,13 +357,16 @@ def rolling_window_forecast(df, predictor, target, window_size=40, expanding=Tru
 
         # Training data
         X_train = sm.add_constant(train[[predictor]])
+        if not isinstance(X_train, pd.DataFrame):
+            X_train = pd.DataFrame(X_train, columns=['const', predictor])
         y_train = train[target]
         model = sm.OLS(y_train, X_train).fit()
 
         # Test data - build as DataFrame with same columns as X_train
         X_test = pd.DataFrame({predictor: [test[predictor]]})
         X_test = sm.add_constant(X_test, has_constant='add')
-        X_test = X_test[X_train.columns]  # Ensure same column order
+        if not isinstance(X_test, pd.DataFrame):
+            X_test = pd.DataFrame(X_test, columns=X_train.columns)
 
         # Predict
         y_pred = model.predict(X_test).values[0]
@@ -714,41 +390,105 @@ def rolling_window_forecast(df, predictor, target, window_size=40, expanding=Tru
         'Sharpe_ann': [sharpe]
     })
 
-    print(f"\n🔷 Rolling window OOS evaluation for {predictor}:")
-    print(f"R² (OOS): {r2:.4f} | RMSE: {rmse:.4f} | Sharpe Ratio (annualized): {sharpe:.4f}")
+    return results_df
+
+def rolling_window_forecast_with_macros(df, predictor, target, window_size=40, expanding=True, macro_controls=[]):
+    """
+    Rolling window forecast with macro controls, standardized to match the non-macro function inputs.
+    """
+    preds, actuals = [], []
+
+    for start in range(len(df) - window_size):
+        train = df.iloc[:window_size + start] if expanding else df.iloc[start:start + window_size]
+        test = df.iloc[window_size + start: window_size + start + 1]
+
+        X_train = train[[predictor] + macro_controls].copy()
+        X_train = sm.add_constant(X_train)
+        if not isinstance(X_train, pd.DataFrame):
+            X_train = pd.DataFrame(X_train, columns=['const'] + [predictor] + macro_controls)
+        y_train = train[target]
+
+        model = sm.OLS(y_train, X_train).fit()
+
+        X_test = test[[predictor] + macro_controls].copy()
+        X_test = sm.add_constant(X_test)
+        if not isinstance(X_test, pd.DataFrame):
+            X_test = pd.DataFrame(X_test, columns=X_train.columns)
+        # === Ensure all train columns exist in test ===
+        for col in X_train.columns:
+            if col not in X_test.columns:
+                if col == 'const':
+                    X_test[col] = 1.0
+                else:
+                    X_test[col] = 0.0
+        X_test = X_test[X_train.columns]
+
+        y_pred = model.predict(X_test).values[0]
+
+        preds.append(y_pred)
+        actuals.append(test[target].values[0])
+
+    preds = np.array(preds)
+    actuals = np.array(actuals)
+
+    # Metrics
+    residuals = actuals - preds
+    rmse = np.sqrt(np.mean(residuals ** 2))
+    r2 = 1 - np.sum(residuals ** 2) / np.sum((actuals - np.mean(actuals)) ** 2)
+    sharpe = np.mean(preds) / np.std(preds) * np.sqrt(4) if np.std(preds) > 0 else np.nan
+
+    results_df = pd.DataFrame({
+        'predictor': [predictor],
+        'R2_OOS': [r2],
+        'RMSE': [rmse],
+        'Sharpe_ann': [sharpe]
+    })
 
     return results_df
 
-
-def batch_rolling_forecasts(df, predictor_vars, target='future_ret_1q', window_size=40, expanding=True, save_csv=True, csv_path='results/rolling_forecast_summary.csv'):
-    """
-    Runs rolling window forecast for each predictor in predictor_vars and saves combined results to CSV.
-    """
+def batch_rolling_forecasts_with_macros(df, predictor_vars, macro_controls, target='future_ret_1q', window_size=40, expanding=True, csv_path='rolling_forecast_with_macros_summary.csv'):
+    os.makedirs(os.path.dirname(f'results/{csv_path}'), exist_ok=True)
     all_results = []
 
     for predictor in predictor_vars:
-        print(f"\n🔄 Running rolling forecast for {predictor}...")
+        try:
+            results_df = rolling_window_forecast_with_macros(
+                df, predictor=predictor, target=target, macro_controls=macro_controls,
+                window_size=window_size, expanding=expanding
+            )
+            all_results.append(results_df)
+        except Exception as e:
+            print(f"⚠️ Skipping {predictor} due to error: {e}")
+
+    results_summary = pd.concat(all_results, ignore_index=True)
+
+    results_summary.to_csv(f'results/{csv_path}', index=False)
+    print(f"\n✅ Rolling forecast summary saved to {csv_path}")
+
+    return results_summary
+
+def batch_rolling_forecasts(df, predictor_vars, target='future_ret_1q', window_size=40, expanding=True, csv_path='rolling_forecast_summary.csv'):
+    """
+    Runs rolling window forecast for each predictor in predictor_vars and saves combined results to CSV.
+    """
+    os.makedirs(os.path.dirname(f'results/{csv_path}'), exist_ok=True)
+    all_results = []
+
+    for predictor in predictor_vars:
         try:
             res = rolling_window_forecast(df, predictor=predictor, target=target, window_size=window_size, expanding=expanding)
             all_results.append(res)
         except Exception as e:
             print(f"⚠️ Skipping {predictor} due to error: {e}")
 
-    if all_results:
-        combined_df = pd.concat(all_results, ignore_index=True)
-
-        if save_csv:
-            import os
-            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-            combined_df.to_csv(csv_path, index=False)
-            print(f"\n✅ Rolling forecast summary saved to {csv_path}")
-
-        return combined_df
-    else:
-        print("❌ No valid forecasts computed.")
-        return pd.DataFrame()
     
+    combined_df = pd.concat(all_results, ignore_index=True)
 
+    combined_df.to_csv(f'results/{csv_path}', index=False)
+    print(f"\n✅ Rolling forecast summary saved to {csv_path}")
+
+    return combined_df
+    
 def summarize_gibbs_results(df, s_samples_post, alpha_samples, beta_samples, sigma2_samples, model_label='yt'):
     """
     Summarize Gibbs sampler outputs:
@@ -832,73 +572,4 @@ def summarize_gibbs_results(df, s_samples_post, alpha_samples, beta_samples, sig
     # Return results dictionary
     return results
 
-
-def rolling_window_forecast_with_macros(df, predictor, target, macro_controls, window_size=40, expanding=True):
-    preds, actuals = [], []
-
-    for start in range(len(df) - window_size):
-        train = df.iloc[:window_size + start]
-        test = df.iloc[window_size + start: window_size + start + 1]
-
-        X_train = train[[predictor] + macro_controls].copy()
-        X_train = sm.add_constant(X_train)
-
-        y_train = train[target]
-
-        model = sm.OLS(y_train, X_train).fit()
-
-        X_test = test[[predictor] + macro_controls].copy()
-        X_test = sm.add_constant(X_test)
-
-        # === Ensure all train columns exist in test ===
-        for col in X_train.columns:
-            if col not in X_test.columns:
-                if col == 'const':
-                    X_test[col] = 1.0
-                else:
-                    X_test[col] = 0.0
-
-        X_test = X_test[X_train.columns]
-
-        y_pred = model.predict(X_test).values[0]
-
-        preds.append(y_pred)
-        actuals.append(test[target].values[0])
-
-    preds = np.array(preds)
-    actuals = np.array(actuals)
-
-    r2 = r2_score(actuals, preds)
-    returns = preds
-    sharpe = (returns.mean() / returns.std()) * np.sqrt(4) if returns.std() > 0 else np.nan
-
-    results_df = pd.DataFrame({'preds': preds, 'actuals': actuals})
-
-    return results_df, r2, sharpe
-
-def batch_rolling_forecasts_with_macros(df, predictor_vars, macro_controls, target='future_ret_1q', window_size=40, expanding=True):
-    all_results = []
-
-    for predictor in predictor_vars:
-        print(f"\n🔄 Running rolling forecast with macros for {predictor}...")
-        try:
-            results_df, r2, sharpe = rolling_window_forecast_with_macros(
-                df, predictor=predictor, target=target, macro_controls=macro_controls,
-                window_size=window_size, expanding=expanding
-            )
-            all_results.append({
-                'predictor': predictor,
-                'R2_OOS': r2 if r2 is not None else np.nan,
-                'Sharpe_ann': sharpe if sharpe is not None else np.nan
-            })
-        except Exception as e:
-            print(f"⚠️ Skipping {predictor} due to error: {e}")
-
-    results_summary = pd.DataFrame(all_results)
-
-    # Save even if empty to avoid KeyError
-    results_summary.to_csv('results/rolling_forecast_with_macros_summary.csv', index=False)
-    print("\n✅ Results saved to results/rolling_forecast_with_macros_summary.csv")
-
-    return results_summary
 
