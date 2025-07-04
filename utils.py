@@ -345,6 +345,64 @@ def backtest_directional_strategy(df, forecast_col, return_col, cost_bp=0, plot=
     
     return results
 
+def forecast_regressions(df, predictors, horizons=[1,4,16], macro_controls=None, target_prefix='future_ret_', csv_prefix='forecast_regression_results'):
+    """
+    Runs forecast regressions for each predictor across specified horizons.
+
+    Parameters:
+    - df: DataFrame with data
+    - predictors: list of predictor variable names
+    - horizons: list of forecast horizons (e.g. [1,4,16])
+    - macro_controls: list of macro control variable names (optional)
+    - target_prefix: prefix for target variable columns (default 'future_ret_')
+    - csv_prefix: prefix for saving CSV files
+
+    Returns:
+    - combined_results: DataFrame with all regression results
+    """
+
+    all_results = []
+
+    for horizon in horizons:
+        target = f"{target_prefix}{horizon}q"
+
+        for predictor in predictors:
+            try:
+                X_vars = [predictor] + (macro_controls if macro_controls is not None else [])
+                X = df[X_vars].copy()
+                X = sm.add_constant(X)
+
+                y = df[target]
+
+                model = sm.OLS(y, X).fit(cov_type='HC1')
+
+                # Extract coefficients excluding the constant
+                for var in X_vars:
+                    all_results.append({
+                        'horizon': horizon,
+                        'predictor': predictor,
+                        'variable': var,
+                        'coef': model.params[var],
+                        'tstat': model.tvalues[var],
+                        'pval': model.pvalues[var],
+                        'r2': model.rsquared,
+                        'nobs': model.nobs
+                    })
+
+            except Exception as e:
+                print(f"⚠️ Skipping {predictor} at horizon {horizon} due to error: {e}")
+
+    combined_results = pd.DataFrame(all_results)
+
+    # Save to CSV
+    os.makedirs('results', exist_ok=True)
+    csv_path = f"results/{csv_prefix}.csv"
+    combined_results.to_csv(csv_path, index=False)
+    print(f"\n✅ Forecast regression results saved to {csv_path}")
+
+    return combined_results
+
+
 def rolling_window_forecast(df, predictor, target, window_size=40, expanding=True):
     preds, actuals = [], []
 
