@@ -7,6 +7,8 @@ from scipy.stats import invgamma, norm
 from numpy.linalg import inv
 import arviz as az
 import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
+import os
 
 def compute_pca(df):
     """
@@ -716,7 +718,7 @@ def estimate_cay_MS_via_gibbs_final(df, k_regimes=2, n_iter=1000, burn_in=200, m
 
     # Add to dataframe
     df = df.copy()
-    df[f'cay_MS_{model}'] = cay_MS
+    df[f'cay_MS_{model}_gibbs'] = cay_MS
 
     if verbose:
         print(f"Full Gibbs sampling with regime-dependent slopes completed. cay_MS for model {model} calculated and added to dataframe.")
@@ -895,7 +897,7 @@ def estimate_cay_MS_gibbs_macro(df, k_regimes=2, n_iter=1000, burn_in=200, model
 
     # Add to dataframe
     df = df.copy()
-    df[f'cay_MS_macro_{model}'] = cay_MS_macro
+    df[f'cay_MS_{model}_gibbs_macro'] = cay_MS_macro
 
     # Prepare results
     results = {
@@ -1050,4 +1052,57 @@ def run_multi_chain_gibbs(
         print(summary)
     
     return combined_posterior
+
+
+def baseline_mean_forecast(df, target='future_ret_1q', window_size=40, expanding=True, save_csv=True, csv_path='results/baseline_mean_results.csv'):
+    """
+    Computes rolling or expanding mean forecast as a baseline model and optionally saves results.
+    
+    Parameters:
+    - df: DataFrame with target column
+    - target: str, name of the target variable (e.g. 'future_ret_1q')
+    - window_size: int, size of the rolling window (ignored if expanding=True)
+    - expanding: bool, use expanding window if True, rolling window if False
+    - save_csv: bool, save results to CSV if True
+    - csv_path: str, path to save the CSV file
+    
+    Returns:
+    - DataFrame with actuals, forecast, errors, and performance metrics.
+    """
+    preds = []
+    actuals = []
+
+    for i in range(window_size, len(df)):
+        train = df.iloc[:i]
+        test = df.iloc[i]
+        
+        if expanding:
+            y_mean = train[target].mean()
+        else:
+            y_mean = train[target].iloc[-window_size:].mean()
+        
+        preds.append(y_mean)
+        actuals.append(test[target])
+    
+    results = pd.DataFrame({
+        'actual': actuals,
+        'pred': preds
+    })
+    results['error'] = results['actual'] - results['pred']
+    
+    # Performance metrics
+    r2 = r2_score(results['actual'], results['pred'])
+    rmse = np.sqrt(np.mean(results['error'] ** 2))
+    sharpe = (results['pred'].mean() / results['pred'].std()) * np.sqrt(12)  # approximate annualized
+
+    print(f"🔷 Baseline Mean Model Performance:\nR² (OOS): {r2:.4f}\nRMSE: {rmse:.4f}\nSharpe Ratio (annualized): {sharpe:.4f}")
+    
+    # Save results if requested
+    if save_csv:
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        results.to_csv(csv_path, index=False)
+        print(f"✅ Baseline mean forecast results saved to {csv_path}")
+
+    return results, {'R2': r2, 'RMSE': rmse, 'Sharpe_ann': sharpe}
+
 
