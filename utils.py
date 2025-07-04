@@ -317,7 +317,7 @@ def backtest_directional_strategy(df, forecast_col, return_col, cost_bp=0, plot=
     max_dd = drawdown.min()
     
     # === Print results ===
-    print(f"🔷 Strategy Backtest Results ({forecast_col})")
+    print(f"Strategy Backtest Results ({forecast_col})")
     print(f"Mean Return: {strategy_mean:.4f}")
     print(f"Std Dev: {strategy_std:.4f}")
     print(f"Annualized Sharpe Ratio: {sharpe:.2f}")
@@ -388,7 +388,7 @@ def forecast_regressions(df, predictor_vars, horizons, macro_controls=None, save
 
             df_reg = df.dropna(subset=required_cols)
             if df_reg.empty:
-                print(f"\n🔷 Horizon h={h}q: No data available for {var}.")
+                print(f"\n Horizon h={h}q: No data available for {var}.")
                 continue
 
             # Define X and y
@@ -397,7 +397,7 @@ def forecast_regressions(df, predictor_vars, horizons, macro_controls=None, save
             y = df_reg[y_col]
 
             model_reg = sm.OLS(y, X).fit()
-            print(f"\n🔷 Forecasting regression for horizon h={h}q using {var} {'with macro controls' if macro_controls else '(no macro)'}")
+            print(f"\n Forecasting regression for horizon h={h}q using {var} {'with macro controls' if macro_controls else '(no macro)'}")
             print(model_reg.summary())
 
             # Store results
@@ -538,12 +538,12 @@ def batch_rolling_forecasts_with_macros(df, predictor_vars, macro_controls, targ
             )
             all_results.append(results_df)
         except Exception as e:
-            print(f"⚠️ Skipping {predictor} due to error: {e}")
+            print(f" Skipping {predictor} due to error: {e}")
 
     results_summary = pd.concat(all_results, ignore_index=True)
 
     results_summary.to_csv(f'results/{csv_path}', index=False)
-    print(f"\n✅ Rolling forecast summary saved to {csv_path}")
+    print(f"\n Rolling forecast summary saved to {csv_path}")
 
     return results_summary
 
@@ -559,13 +559,13 @@ def batch_rolling_forecasts(df, predictor_vars, target='future_ret_1q', window_s
             res = rolling_window_forecast(df, predictor=predictor, target=target, window_size=window_size, expanding=expanding)
             all_results.append(res)
         except Exception as e:
-            print(f"⚠️ Skipping {predictor} due to error: {e}")
+            print(f"Skipping {predictor} due to error: {e}")
 
     
     combined_df = pd.concat(all_results, ignore_index=True)
 
     combined_df.to_csv(f'results/{csv_path}', index=False)
-    print(f"\n✅ Rolling forecast summary saved to {csv_path}")
+    print(f"\n Rolling forecast summary saved to {csv_path}")
 
     return combined_df
     
@@ -621,7 +621,7 @@ def summarize_gibbs_results(df, s_samples_post, alpha_samples, beta_samples, sig
         'Std': np.concatenate([alpha_std, [beta_std, sigma2_std]])
     })
 
-    print("\n🔷 Posterior Parameter Summary:")
+    print("\n Posterior Parameter Summary:")
     print(param_summary)
 
     # Save to results dict
@@ -644,7 +644,7 @@ def summarize_gibbs_results(df, s_samples_post, alpha_samples, beta_samples, sig
     beta_ess = ess(beta_samples)
     sigma2_ess = ess(sigma2_samples)
 
-    print(f"\n🔷 Effective Sample Size (ESS): beta = {beta_ess:.1f}, sigma2 = {sigma2_ess:.1f}")
+    print(f"\n Effective Sample Size (ESS): beta = {beta_ess:.1f}, sigma2 = {sigma2_ess:.1f}")
 
     results['ess_beta'] = beta_ess
     results['ess_sigma2'] = sigma2_ess

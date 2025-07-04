@@ -553,7 +553,7 @@ def baseline_mean_forecast(df, target='future_ret_1q', window_size=40, expanding
     if save_csv:
         os.makedirs(os.path.dirname(csv_path), exist_ok=True)
         results.to_csv(csv_path, index=False)
-        print(f"✅ Baseline mean forecast results saved to {csv_path}")
+        print(f"Baseline mean forecast results saved to {csv_path}")
 
     return results, {'R2': r2, 'RMSE': rmse, 'Sharpe_ann': sharpe}
 
