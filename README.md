@@ -15,7 +15,6 @@ It includes full empirical replication, rolling window forecasting, and preparat
 
 ### Project Structure
 
-.
 - data/                   # Raw and cleaned input datasets
 - utils.py                # Python scripts for forecasting, and plotting
 - results/                # Output tables and figures from analysis
